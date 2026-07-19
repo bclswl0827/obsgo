@@ -4,49 +4,53 @@ import (
 	"math"
 )
 
+// numpy.finfo(float64).tiny is the smallest positive *normal* float64. It is
+// deliberately not math.SmallestNonzeroFloat64, which is a subnormal value.
+const float64Tiny = 0x1p-1022
+
 // Computes the standard STA/LTA from a given input array a. The length of
 // the STA is given by nsta in samples, respectively is the length of the
 // LTA given by nlta in samples. Translated from Obspy.
 // https://docs.obspy.org/tutorial/code_snippets/trigger_tutorial.html#classic-sta-lta
 func ClassicStaLta(a []float64, nsta, nlta int) []float64 {
 	// The cumulative sum can be exploited to calculate a moving average
-	sta := numpyCumsumFloat(a, func(f float64) float64 { return math.Pow(f, 2) })
+	sta := numpyCumsumFloat(a, func(f float64) float64 { return f * f })
 	lta := make([]float64, len(sta))
 	copy(lta, sta)
 
 	// Compute for STA
-	tempArrLen := len(sta) - nsta
-	tempArr1 := make([]float64, tempArrLen)
-	copy(tempArr1, sta[:len(sta)-nsta]) // Equal to sta[:-nsta] in Python
-	tempArr2 := make([]float64, tempArrLen)
-	copy(tempArr2, sta[nsta:])
-	for i := 0; i < tempArrLen; i++ {
-		sta[i+nsta] = tempArr2[i] - tempArr1[i]
+	if nsta < len(sta) {
+		tempArrLen := len(sta) - nsta
+		tempArr1 := append([]float64(nil), sta[:tempArrLen]...)
+		tempArr2 := append([]float64(nil), sta[nsta:]...)
+		for i := 0; i < tempArrLen; i++ {
+			sta[i+nsta] = tempArr2[i] - tempArr1[i]
+		}
 	}
 	for i := range lta {
 		sta[i] /= float64(nsta)
 	}
 
 	// Compute for LTA
-	tempArrLen = len(lta) - nlta
-	tempArr1 = make([]float64, tempArrLen)
-	copy(tempArr1, lta[:len(sta)-nsta]) // Equal to lta[:-nlta] in Python
-	tempArr2 = make([]float64, tempArrLen)
-	copy(tempArr2, lta[nlta:])
-	for i := 0; i < tempArrLen; i++ {
-		lta[i+nlta] = tempArr2[i] - tempArr1[i]
+	if nlta < len(lta) {
+		tempArrLen := len(lta) - nlta
+		tempArr1 := append([]float64(nil), lta[:tempArrLen]...)
+		tempArr2 := append([]float64(nil), lta[nlta:]...)
+		for i := 0; i < tempArrLen; i++ {
+			lta[i+nlta] = tempArr2[i] - tempArr1[i]
+		}
 	}
 	for i := range lta {
 		lta[i] /= float64(nlta)
 	}
 
 	// Pad zeros
-	for i := 0; i < nlta-1; i++ {
+	for i := 0; i < min(nlta-1, len(sta)); i++ {
 		sta[i] = 0
 	}
 
 	// Avoid division by zero by setting zero values to tiny float
-	dtiny := math.SmallestNonzeroFloat64
+	dtiny := float64Tiny
 	for i, val := range lta {
 		if val < dtiny {
 			lta[i] = dtiny
@@ -69,7 +73,7 @@ func RecursiveStaLta(a []float64, nsta, nlta int) []float64 {
 	csta := 1 / float64(nsta)
 	clta := 1 / float64(nlta)
 	sta := 0.0
-	lta := math.SmallestNonzeroFloat64 // avoid zero division
+	lta := float64Tiny // avoid zero division
 	a = numpySquareFloat(a)
 	charfct := numpyZerosFloat(ndat)
 	icsta := 1 - csta
@@ -79,7 +83,7 @@ func RecursiveStaLta(a []float64, nsta, nlta int) []float64 {
 		lta = clta*a[i] + iclta*float64(lta)
 		charfct[i] = sta / lta
 	}
-	for i := 0; i < nlta; i++ {
+	for i := 0; i < min(nlta, ndat); i++ {
 		charfct[i] = 0
 	}
 
@@ -112,11 +116,11 @@ func DelayedStaLta(a []float64, nsta, nlta int) []float64 {
 		if index4 < 0 {
 			index4 = m - (nsta + nlta + 1) + i
 		}
-		sta[i] = (math.Pow(a[i], 2)+math.Pow(a[index1], 2))/float64(nsta) + sta[index2]
-		lta[i] = (math.Pow(a[index3], 2)+math.Pow(a[index4], 2))/float64(nlta) + lta[index2]
+		sta[i] = (a[i]*a[i]+a[index1]*a[index1])/float64(nsta) + sta[index2]
+		lta[i] = (a[index3]*a[index3]+a[index4]*a[index4])/float64(nlta) + lta[index2]
 	}
 
-	for i := 0; i < nlta+nsta+50; i++ {
+	for i := 0; i < min(nlta+nsta+50, m); i++ {
 		sta[i] = 0
 		lta[i] = 1 // avoid division by zero
 	}
@@ -133,7 +137,7 @@ func DelayedStaLta(a []float64, nsta, nlta int) []float64 {
 func ZDetect(a []float64, nsta int) []float64 {
 	// Z-detector given by Swindell and Snell (1977)
 	// Standard Sta shifted by 1
-	sta := numpyCumsumFloat(a, func(f float64) float64 { return math.Pow(f, 2) })
+	sta := numpyCumsumFloat(a, func(f float64) float64 { return f * f })
 
 	tempArr1 := make([]float64, len(sta)-nsta-1)
 	copy(tempArr1, sta[:len(sta)-nsta-1])

@@ -63,10 +63,11 @@ func numpyZerosFloat(n int) []float64 {
 }
 
 func numpySquareFloat(a []float64) []float64 {
+	result := make([]float64, len(a))
 	for i, v := range a {
-		a[i] = v * v
+		result[i] = v * v
 	}
-	return a
+	return result
 }
 
 func numpyConcatenateFloat(a, b []float64) []float64 {
